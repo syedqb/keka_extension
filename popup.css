@@ -1,0 +1,383 @@
+:root {
+    --bg: #12100e;
+    --surface: #1a1714;
+    --surface-lift: #211d19;
+    --surface-today: #241e13;
+    --line: #2e2823;
+    --text: #ede6dc;
+    --muted: #8b8078;
+    --dim: #5f564f;
+
+    --amber: #ffb627;
+    --amber-deep: #c77f12;
+    --green: #7ed492;
+    --red: #ef6a5f;
+
+    --mono: "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+
+    --ease: cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    width: 344px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+}
+
+/* Film grain over the whole surface — keeps the dark from going flat */
+.grain {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    opacity: 0.32;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.shell {
+    position: relative;
+    z-index: 1;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+
+.bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--surface-lift), var(--surface));
+}
+
+.mark {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    color: var(--text);
+    /* min-width:0 lets the name ellipsis instead of wrapping and growing the header */
+    min-width: 0;
+}
+
+.mark-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* looser wordmark tracking reads as spaced-out on a real name, and costs width */
+    letter-spacing: 0.08em;
+}
+
+.mark-pip {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 0 rgba(255, 182, 39, 0.55);
+    animation: pip 2.4s var(--ease) infinite;
+}
+
+@keyframes pip {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 182, 39, 0.5); }
+    70%  { box-shadow: 0 0 0 7px rgba(255, 182, 39, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 182, 39, 0); }
+}
+
+.bar-meta {
+    flex: none;
+    padding-left: 10px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+
+/* ── Hero countdown ─────────────────────────────────── */
+
+.hero {
+    position: relative;
+    overflow: hidden;
+    padding: 26px 16px 0;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+
+.hero-glow {
+    position: absolute;
+    top: -60%;
+    left: 50%;
+    width: 300px;
+    height: 300px;
+    transform: translateX(-50%);
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(255, 182, 39, 0.16), transparent 62%);
+    transition: background 0.5s var(--ease);
+}
+
+.hero[data-state="over"] .hero-glow {
+    background: radial-gradient(circle, rgba(126, 212, 146, 0.16), transparent 62%);
+}
+
+.hero[data-state="error"] .hero-glow {
+    background: radial-gradient(circle, rgba(239, 106, 95, 0.14), transparent 62%);
+}
+
+.hero-eyebrow {
+    position: relative;
+    margin: 0 0 12px;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+
+.countdown {
+    position: relative;
+    margin: 0;
+    font-size: 42px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    line-height: 1;
+    color: var(--amber);
+    text-shadow: 0 0 26px rgba(255, 182, 39, 0.28);
+    transition: color 0.4s var(--ease), text-shadow 0.4s var(--ease);
+}
+
+.countdown .unit {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--amber-deep);
+    margin: 0 5px 0 1px;
+}
+
+.countdown .sep {
+    animation: blink 2s steps(1) infinite;
+}
+
+@keyframes blink {
+    50% { opacity: 0.28; }
+}
+
+.hero[data-state="over"] .countdown {
+    color: var(--green);
+    text-shadow: 0 0 26px rgba(126, 212, 146, 0.3);
+    font-size: 30px;
+}
+
+.hero[data-state="error"] .countdown {
+    color: var(--red);
+    text-shadow: none;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+.hero[data-state="loading"] .countdown {
+    color: var(--dim);
+    text-shadow: none;
+    animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+    50% { opacity: 0.4; }
+}
+
+.hero-foot {
+    position: relative;
+    margin: 14px 0 20px;
+    font-size: 11.5px;
+    color: var(--muted);
+    min-height: 15px;
+}
+
+.hero-foot strong {
+    color: var(--text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Day-progress rule pinned to the hero's bottom edge */
+.hero-track {
+    position: relative;
+    height: 2px;
+    margin: 0 -16px;
+    background: var(--line);
+}
+
+.hero-fill {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--amber-deep), var(--amber));
+    box-shadow: 0 0 10px rgba(255, 182, 39, 0.55);
+    transition: width 0.9s var(--ease);
+}
+
+.hero[data-state="over"] .hero-fill {
+    background: var(--green);
+    box-shadow: 0 0 10px rgba(126, 212, 146, 0.5);
+}
+
+.hero[data-state="error"] .hero-fill,
+.hero[data-state="loading"] .hero-fill {
+    background: none;
+    box-shadow: none;
+}
+
+/* ── Week list ──────────────────────────────────────── */
+
+/* No inner scroll: a full 7-day week must fit under Chrome's 600px popup cap,
+   so the tile gap below is paid for out of each tile's vertical padding. */
+.week {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px;
+}
+
+.day {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 4px 10px;
+    /* trimmed from 9px to buy the 5px tile gap without busting the 600px cap */
+    padding: 7px 10px 7px 13px;
+    border-radius: 7px;
+    /* left status rule, drawn as a background so it hugs the radius;
+       the colour layer underneath is what makes each row read as its own tile */
+    background:
+        linear-gradient(var(--rule, var(--line)), var(--rule, var(--line))) left / 2px 100% no-repeat,
+        var(--surface);
+    transition: background-color 0.18s var(--ease);
+
+    opacity: 0;
+    animation: rise 0.5s var(--ease) forwards;
+    animation-delay: var(--d, 0ms);
+}
+
+.day:hover {
+    background-color: var(--surface-lift);
+}
+
+@keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.day--ahead { --rule: var(--green); }
+.day--behind { --rule: var(--red); }
+.day--off { --rule: var(--line); }
+/* Warmer than a plain lift so today still stands apart from a hovered tile */
+.day--today {
+    background-color: var(--surface-today);
+    --rule: var(--amber);
+}
+
+.day-date {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.01em;
+}
+
+.day--off .day-date {
+    color: var(--muted);
+}
+
+.day-delta {
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.day-delta--ahead {
+    color: var(--green);
+    background: rgba(126, 212, 146, 0.1);
+}
+
+.day-delta--behind {
+    color: var(--red);
+    background: rgba(239, 106, 95, 0.1);
+}
+
+.day-delta--flat {
+    color: var(--dim);
+    background: transparent;
+}
+
+.day-meta {
+    grid-column: 1 / -1;
+    font-size: 10.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    /* single line — a wrapped separator dot reads as a typo */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.day-meta .sep-dot {
+    color: var(--dim);
+    padding: 0 5px;
+}
+
+/* ── Footer ─────────────────────────────────────────── */
+
+.foot {
+    padding: 10px 16px 12px;
+    border-top: 1px solid var(--line);
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    text-align: center;
+    background: var(--surface);
+}
+
+.foot--error {
+    color: var(--red);
+}
+
+/* ── Skeleton ───────────────────────────────────────── */
+
+.skeleton {
+    /* matches a real tile; spacing comes from .week's gap, not margins */
+    height: 47px;
+    flex: none;
+    border-radius: 7px;
+    background: linear-gradient(90deg, var(--surface) 25%, var(--surface-lift) 50%, var(--surface) 75%);
+    background-size: 220% 100%;
+    animation: sweep 1.3s linear infinite;
+}
+
+@keyframes sweep {
+    to { background-position: -220% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    .day { opacity: 1; }
+}

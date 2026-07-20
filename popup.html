@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KEKA</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="shell">
+        <header class="bar">
+            <div class="mark">
+                <span class="mark-pip" aria-hidden="true"></span>
+                <span class="mark-name" id="profileName">KEKA</span>
+            </div>
+            <div class="bar-meta" id="weekLabel">&nbsp;</div>
+        </header>
+
+        <section class="hero" id="hero" data-state="loading">
+            <div class="hero-glow" aria-hidden="true"></div>
+            <p class="hero-eyebrow" id="heroEyebrow">Syncing</p>
+            <p class="countdown" id="timer" role="timer" aria-live="off">--:--:--</p>
+            <p class="hero-foot" id="heroFoot">Reading your week&hellip;</p>
+            <div class="hero-track" aria-hidden="true"><div class="hero-fill" id="heroFill"></div></div>
+        </section>
+
+        <section class="week" id="output" aria-label="This week"></section>
+
+        <footer class="foot">
+            <span id="footNote">Suggestions only &mdash; Keka is the source of truth</span>
+        </footer>
+    </div>
+
+    <script type="module" src="popup.js"></script>
+</body>
+</html>
