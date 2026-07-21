@@ -7,6 +7,7 @@ import {
   pickProfileName,
   parseLogShifts,
   buildUiModel,
+  weekBudget,
   contextFromPayload,
   pickFocusDay,
   getMondayOfCurrentWeek,
@@ -24,6 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
     weekLabel: document.getElementById('weekLabel'),
     footNote: document.getElementById('footNote'),
     profileName: document.getElementById('profileName'),
+    budget: document.getElementById('budget'),
+    budgetDone: document.getElementById('budgetDone'),
+    budgetLeft: document.getElementById('budgetLeft'),
+    budgetFill: document.getElementById('budgetFill'),
   };
 
   renderSkeleton(ui.output);
@@ -101,6 +106,7 @@ function renderWeek(ui, payload) {
   }
 
   workDays.forEach((day, i) => ui.output.appendChild(renderDay(day, i, day === focus)));
+  renderBudget(ui, weekBudget(workDays, focus));
 
   // A credited On Duty day has no clock to race — Keka grants the full shift
   // regardless, and an unpunched flexible shift reports a meaningless end time.
@@ -140,6 +146,29 @@ function reportUnknownStatuses(workDays, payload) {
   );
 }
 
+/** Weekly hours budget — the target is derived from the API, never hardcoded. */
+function renderBudget(ui, budget) {
+  if (!budget.requiredHours) { ui.budget.hidden = true; return; }
+  ui.budget.hidden = false;
+
+  const done = budget.balanceHours >= 0;
+  ui.budgetDone.innerHTML =
+    `<strong>${formatHours(budget.workedHours)}</strong> of ${formatHours(budget.requiredHours)} this week`;
+  ui.budgetLeft.textContent = done
+    ? `+${formatHours(budget.balanceHours)} ahead`
+    : `${formatHours(budget.remainingHours)} to go`;
+  ui.budgetLeft.classList.toggle('is-done', done);
+  ui.budgetFill.classList.toggle('is-done', done);
+  ui.budgetFill.style.width = `${budget.percent}%`;
+}
+
+function formatHours(decimal) {
+  const total = Math.round((decimal || 0) * 60);
+  const h = Math.floor(Math.abs(total) / 60);
+  const m = Math.abs(total) % 60;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
 function renderSkeleton(output) {
   output.innerHTML = '<div class="skeleton"></div>'.repeat(4);
 }
@@ -166,7 +195,9 @@ function renderDay(day, index, isFocus) {
   const delta = document.createElement('div');
   if (off) {
     delta.className = 'day-delta day-delta--flat';
-    delta.textContent = day.statusKind === 'unknown' ? '?' : 'OFF';
+    delta.textContent = day.statusKind === 'unknown' ? '?'
+      : day.statusKind === 'scheduled' ? formatHours(day.requiredHours)
+      : 'OFF';
   } else {
     delta.className = `day-delta day-delta--${day.accMinutes > 0 ? 'ahead' : (day.accMinutes < 0 ? 'behind' : 'flat')}`;
     delta.textContent = formatDelta(day.accMinutes);
@@ -179,6 +210,7 @@ function renderDay(day, index, isFocus) {
   if (off) {
     // Never assume "leave" — an unrecognised status says so with its raw code.
     bits = [day.statusLabel || 'On leave'];
+    if (day.statusKind === 'scheduled') bits.push('not yet worked');
   } else if (day.isCredited) {
     // On Duty / WFH: no punches, and no meaningful exit time — an unpunched
     // flexible shift reports a placeholder end, so showing it would mislead.

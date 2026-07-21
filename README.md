@@ -71,6 +71,17 @@ type, e.g. `Privileged Leave`.
 
 Only the summary call is required — if the other two fail the popup still renders.
 
+## Weekly hours
+
+Offices vary — 45h over 5 days, 40h over 5, 48h over 6 — and many let you split
+the week unevenly (8h today, 10h tomorrow) so long as the total lands.
+
+The weekly target is **never hardcoded**. It is summed from each working day's own
+`shiftDuration`, taking week offs out: 5 x 9h derives 45h here, 5 x 8h derives 40h
+somewhere else, with no configuration. The popup shows progress against it
+("17h 00m of 45h 00m this week"), and the suggested exit spreads any shortfall
+across the days you have left rather than assuming a fixed day length.
+
 ## Other tenants
 
 The Keka host is hardcoded. For a different company, edit `TENANT` at the top of

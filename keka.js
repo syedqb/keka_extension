@@ -298,7 +298,11 @@ export function classifyDay(shift, context = {}) {
 
   if (!shift.shiftDuration) return { kind: 'off', label: 'Weekly off', credited: false };
 
-  // Nothing logged and nothing to explain it — absent, or a day not started yet.
+  // A weekday with nothing logged is only an anomaly once it's in the past.
+  const today = dateKey(new Date());
+  if (key > today) return { kind: 'scheduled', label: 'Scheduled', credited: false };
+  if (key === today) return { kind: 'scheduled', label: 'Not clocked in', credited: false };
+
   return { kind: 'unknown', label: 'No entries', credited: false };
 }
 
@@ -386,6 +390,12 @@ export function buildUiModel(logShifts, context = {}) {
       statusLabel: status.label,
       statusKind: status.kind,
       isCredited: status.credited,
+      // Straight from the API — never a hardcoded shift length.
+      // A scheduled weekday owes hours whether or not it has been worked yet, so
+      // this keys off "not a day off" rather than "already worked". Only week offs
+      // and leave excuse the hours.
+      requiredHours: status.kind === 'off' ? 0 : (shift.shiftDuration || 0),
+      workedHours: isWorkingDay ? (workedHours || 0) : 0,
       attendanceDayStatus: shift.attendanceDayStatus,
       workedLabel: status.credited
         ? getGrossTime(shift.shiftDuration)
@@ -405,6 +415,47 @@ export function buildUiModel(logShifts, context = {}) {
   }
 
   return workDays;
+}
+
+/**
+ * The week as an hours budget.
+ *
+ * Offices differ — 45h over 5 days, 40h over 5, 48h over 6 — and some let you
+ * vary the split (8h today, 10h tomorrow) so long as the week total lands. So the
+ * target is summed from each working day's own shiftDuration rather than assuming
+ * any per-day figure: 5 × 9h derives 45h here, 5 × 8h would derive 40h elsewhere.
+ *
+ * `remainingToday` spreads the shortfall correctly: it is what's left for the week
+ * minus the standard hours the *later* working days will absorb.
+ */
+export function weekBudget(workDays, focusDay = null) {
+  let required = 0;
+  let worked = 0;
+  let laterRequired = 0;
+  let seenFocus = false;
+
+  for (const day of workDays) {
+    required += day.requiredHours || 0;
+    worked += day.workedHours || 0;
+
+    if (focusDay && day === focusDay) { seenFocus = true; continue; }
+    if (focusDay && seenFocus) laterRequired += day.requiredHours || 0;
+  }
+
+  const remainingWeek = Math.max(0, required - worked);
+  const focusWorked = focusDay ? (focusDay.workedHours || 0) : 0;
+
+  return {
+    requiredHours: required,
+    workedHours: worked,
+    balanceHours: worked - required,
+    remainingHours: remainingWeek,
+    // Hours still owed on the focus day itself, after later days take their share.
+    remainingToday: focusDay
+      ? Math.max(0, required - (worked - focusWorked) - laterRequired - focusWorked)
+      : 0,
+    percent: required > 0 ? Math.min(100, (worked / required) * 100) : 0,
+  };
 }
 
 /** Today's row if the week contains it, else the last row. */

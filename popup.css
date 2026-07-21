@@ -110,7 +110,8 @@ body {
 .hero {
     position: relative;
     overflow: hidden;
-    padding: 26px 16px 0;
+    /* tightened to make room for the week-budget strip under the 600px cap */
+    padding: 20px 16px 0;
     text-align: center;
     border-bottom: 1px solid var(--line);
     background: var(--surface);
@@ -201,7 +202,7 @@ body {
 
 .hero-foot {
     position: relative;
-    margin: 14px 0 20px;
+    margin: 12px 0 16px;
     font-size: 11.5px;
     color: var(--muted);
     min-height: 15px;
@@ -242,13 +243,66 @@ body {
 
 /* ── Week list ──────────────────────────────────────── */
 
+/* ── Week budget ────────────────────────────────────── */
+
+.budget {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+}
+
+.budget-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+}
+
+.budget-done strong {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.budget-left {
+    color: var(--dim);
+    white-space: nowrap;
+}
+
+.budget-left.is-done {
+    color: var(--green);
+}
+
+.budget-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line);
+    overflow: hidden;
+}
+
+.budget-fill {
+    height: 100%;
+    width: 0;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--amber-deep), var(--amber));
+    transition: width 0.7s var(--ease);
+}
+
+.budget-fill.is-done {
+    background: var(--green);
+}
+
 /* No inner scroll: a full 7-day week must fit under Chrome's 600px popup cap,
    so the tile gap below is paid for out of each tile's vertical padding. */
 .week {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 8px 10px;
+    gap: 4px;
+    padding: 7px 10px;
 }
 
 .day {
