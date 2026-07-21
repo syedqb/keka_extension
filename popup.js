@@ -91,6 +91,7 @@ async function loadProfileName(el) {
 function renderWeek(ui, payload) {
   const workDays = buildUiModel(parseLogShifts(payload));
   const focus = pickFocusDay(workDays);
+  reportUnknownStatuses(workDays, payload);
 
   ui.output.innerHTML = '';
   if (!focus) {
@@ -102,6 +103,28 @@ function renderWeek(ui, payload) {
   ui.heroFoot.innerHTML = `Suggested exit <strong>${focus.adjustedExitTime}</strong>`;
   startCountdown(ui, focus);
   return true;
+}
+
+/**
+ * Dump the raw row for any day whose status we couldn't classify.
+ *
+ * Keka's attendanceDayStatus enum isn't published, so this is how a new code
+ * (On Duty, comp-off, half day…) gets identified instead of silently rendering
+ * as something it isn't. Right-click the popup → Inspect → Console to read it.
+ */
+function reportUnknownStatuses(workDays, payload) {
+  const unknown = workDays.filter(d => d.statusLabel && d.statusLabel.startsWith('Status'));
+  if (!unknown.length) return;
+
+  const rows = (payload && payload.data) || [];
+  console.warn(
+    `[keka] ${unknown.length} day(s) with an unrecognised attendanceDayStatus. ` +
+    `Please report the raw rows below so they can be mapped:`,
+    unknown.map(d => {
+      const raw = rows.find(r => new Date(r.shiftStartTime).toDateString() === d.startDate.toDateString());
+      return { date: d.shortDate, attendanceDayStatus: d.attendanceDayStatus, raw };
+    })
+  );
 }
 
 function renderSkeleton(output) {
@@ -130,7 +153,7 @@ function renderDay(day, index, isFocus) {
   const delta = document.createElement('div');
   if (off) {
     delta.className = 'day-delta day-delta--flat';
-    delta.textContent = 'OFF';
+    delta.textContent = day.statusLabel && day.statusLabel.startsWith('Status') ? '?' : 'OFF';
   } else {
     delta.className = `day-delta day-delta--${day.accMinutes > 0 ? 'ahead' : (day.accMinutes < 0 ? 'behind' : 'flat')}`;
     delta.textContent = formatDelta(day.accMinutes);
@@ -138,10 +161,19 @@ function renderDay(day, index, isFocus) {
 
   const meta = document.createElement('div');
   meta.className = 'day-meta';
-  const bits = off
-    ? ['On leave']
-    : [`${day.entryTime} – ${day.exitTime}`, `exit ${day.adjustedExitTime}`];
-  if (!off && day.workedLabel) bits.push(day.workedLabel);
+
+  let bits;
+  if (off) {
+    // Never assume "leave" — an unrecognised status says so with its raw code.
+    bits = [day.statusLabel || 'On leave'];
+  } else if (day.isCredited) {
+    // On Duty / WFH: no punches to show, so name the status instead.
+    bits = [day.statusLabel || 'On duty', `exit ${day.adjustedExitTime}`];
+    if (day.workedLabel) bits.push(`${day.workedLabel} credited`);
+  } else {
+    bits = [`${day.entryTime} – ${day.exitTime}`, `exit ${day.adjustedExitTime}`];
+    if (day.workedLabel) bits.push(day.workedLabel);
+  }
   meta.innerHTML = bits.map(b => `<span>${b}</span>`).join('<span class="sep-dot">·</span>');
 
   el.append(date, delta, meta);

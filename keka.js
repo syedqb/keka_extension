@@ -158,16 +158,79 @@ export function pickProfileName(payload) {
 /* ── Model ─────────────────────────────────────────── */
 
 class LogShift {
-  constructor(dayType, shiftStartTime, shiftEndTime, inTime, outTime, shiftDuration, totalDuration, attendanceDayStatus) {
-    this.dayType = dayType;
-    this.shiftStartTime = shiftStartTime;
-    this.shiftEndTime = shiftEndTime;
-    this.inTime = inTime;
-    this.outTime = outTime;
-    this.shiftDuration = shiftDuration;
-    this.totalDuration = totalDuration;
-    this.attendanceDayStatus = attendanceDayStatus;
+  constructor(fields) {
+    Object.assign(this, fields);
   }
+}
+
+/**
+ * attendanceDayStatus codes confirmed from live responses.
+ *
+ * Keka does not publish this enum, so anything not listed here is treated as
+ * "unknown" and reported rather than guessed at — see classifyDay().
+ */
+export const DAY_STATUS = {
+  PRESENT: 1,
+};
+
+/**
+ * Status codes Keka credits as a full working day with no in/out punches:
+ * On Duty, Work From Home, on-duty regularisation.
+ *
+ * Add a code here once confirmed — everything else is inferred by
+ * looksLikeOnDuty() below, which does not depend on knowing the enum.
+ */
+export const ON_DUTY_STATUS_CODES = new Set();
+
+const ON_DUTY_HINT = /(on.?duty|work.?from.?home|\bwfh\b|remote)/i;
+
+/**
+ * Detect On Duty / WFH without relying on the undocumented status enum.
+ *
+ * The summary rows carry extra fields we don't otherwise read, and an On Duty day
+ * is flagged somewhere among them. Rather than hardcode a field name we haven't
+ * confirmed, look for a truthy on-duty-ish key or a matching string value.
+ */
+function looksLikeOnDuty(raw) {
+  if (!raw || typeof raw !== 'object') return false;
+
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === null || value === undefined || value === false) continue;
+    if (ON_DUTY_HINT.test(key) && value !== 0) return true;
+    if (typeof value === 'string' && ON_DUTY_HINT.test(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * Decide how a day counts.
+ *
+ *   worked  — you owe/earn hours on this day
+ *   off     — weekly off, holiday, or leave; no hours expected
+ *   unknown — an unrecognised status code
+ *
+ * "unknown" is deliberately balance-neutral and labelled with its raw code.
+ * The old logic treated every non-PRESENT status as leave, which mislabelled
+ * On Duty (WFH) days and, worse, dropped them from the running balance.
+ */
+export function classifyDay(shift) {
+  const status = shift.attendanceDayStatus;
+  const hasPunches = shift.inTime != null;
+
+  if (status === DAY_STATUS.PRESENT) return { kind: 'worked', label: null, credited: false };
+
+  // Credited full day: on duty / WFH, typically with no badge punches at all.
+  if (ON_DUTY_STATUS_CODES.has(status) || looksLikeOnDuty(shift.raw)) {
+    return { kind: 'worked', label: 'On duty', credited: !hasPunches };
+  }
+
+  // Punches on a non-present status still mean you were at work.
+  if (hasPunches) return { kind: 'worked', label: null, credited: false };
+
+  // No punches, no shift expected — a genuine day off.
+  if (!shift.shiftDuration) return { kind: 'off', label: 'Weekly off', credited: false };
+
+  return { kind: 'unknown', label: `Status ${status}`, credited: false };
 }
 
 /**
@@ -197,16 +260,17 @@ export function parseLogShifts(responseData) {
   return rows.map(shift => {
     const span = summarizePairs(shift.validInOutPairs);
 
-    return new LogShift(
-      shift.dayType,
-      new Date(shift.shiftStartTime),
-      new Date(shift.shiftEndTime),
-      span.inTime,
-      span.outTime,
-      shift.shiftDuration,
-      span.totalDuration,
-      shift.attendanceDayStatus
-    );
+    return new LogShift({
+      raw: shift,
+      dayType: shift.dayType,
+      shiftStartTime: new Date(shift.shiftStartTime),
+      shiftEndTime: new Date(shift.shiftEndTime),
+      inTime: span.inTime,
+      outTime: span.outTime,
+      shiftDuration: shift.shiftDuration,
+      totalDuration: span.totalDuration,
+      attendanceDayStatus: shift.attendanceDayStatus,
+    });
   });
 }
 
@@ -228,12 +292,17 @@ export function buildUiModel(logShifts) {
   let inMinute = 0;
 
   for (const shift of logShifts) {
-    const isWorkingDay = shift.attendanceDayStatus === 1;
+    const status = classifyDay(shift);
+    const isWorkingDay = status.kind === 'worked';
 
     let adjustedExitTime = new Date(shift.shiftEndTime);
     if (isWorkingDay) {
       adjustedExitTime = new Date(shift.shiftEndTime.getTime() - inMinute * 60000);
     }
+
+    // A credited day (On Duty / WFH) has no punches but counts as the full shift,
+    // so it lands balance-neutral instead of looking like a day of missed hours.
+    const workedHours = status.credited ? shift.shiftDuration : shift.totalDuration;
 
     const day = new WorkDay({
       date: dateFormat.format(new Date(shift.shiftStartTime)),
@@ -246,11 +315,16 @@ export function buildUiModel(logShifts) {
       accMinutes: inMinute,
       adjustedExitTimeDate: adjustedExitTime,
       isWorkingDay: isWorkingDay,
-      workedLabel: shift.outTime != null ? getGrossTime(shift.totalDuration) : null,
+      statusLabel: status.label,
+      isCredited: status.credited,
+      attendanceDayStatus: shift.attendanceDayStatus,
+      workedLabel: status.credited
+        ? getGrossTime(shift.shiftDuration)
+        : (shift.outTime != null ? getGrossTime(shift.totalDuration) : null),
     });
 
-    if (isWorkingDay && shift.outTime != null) {
-      accumulatedMinute += shift.totalDuration - shift.shiftDuration;
+    if (isWorkingDay && (shift.outTime != null || status.credited)) {
+      accumulatedMinute += workedHours - shift.shiftDuration;
       inMinute = accumulatedMinute * 60;
     }
 

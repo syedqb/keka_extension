@@ -49,6 +49,23 @@ the extension's card in `chrome://extensions`.
 Everything stays on your machine — the extension talks to Keka and nothing else.
 There is no analytics, no server, no third party.
 
+## Day statuses
+
+Keka does not publish its `attendanceDayStatus` enum, so the extension classifies
+each day defensively:
+
+- **Present / punched in** — normal working day, balance from actual hours.
+- **On Duty / WFH** — credited as a full shift even with no badge punches, so it
+  lands balance-neutral instead of looking like a day of missed hours. Detected
+  from the row's on-duty fields rather than a hardcoded status code.
+- **Weekly off / holiday** — no shift expected, ignored in the balance.
+- **Anything unrecognised** — shown as `Status <n>` with a `?` badge and left out
+  of the balance. It is never labelled "On leave" on a guess.
+
+If a day shows `Status <n>`, open the popup, right-click → **Inspect** →
+**Console**. The raw row is logged there; add the code to `ON_DUTY_STATUS_CODES`
+in `keka.js` if it should count as worked.
+
 ## Other tenants
 
 The Keka host is hardcoded. For a different company, edit `TENANT` at the top of
