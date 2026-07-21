@@ -7,6 +7,7 @@ import {
   writeCache,
   parseLogShifts,
   buildUiModel,
+  contextFromPayload,
   pickFocusDay,
   formatBadgeText,
   KekaAuthError,
@@ -45,7 +46,7 @@ async function refresh() {
     const payload = await loadWeek();
     await writeCache(payload);
 
-    const focus = pickFocusDay(buildUiModel(parseLogShifts(payload)));
+    const focus = pickFocusDay(buildUiModel(parseLogShifts(payload), contextFromPayload(payload)));
     if (!focus) {
       await setBadge('', null, 'Keka — nothing logged this week');
       return;

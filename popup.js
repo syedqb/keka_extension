@@ -7,6 +7,7 @@ import {
   pickProfileName,
   parseLogShifts,
   buildUiModel,
+  contextFromPayload,
   pickFocusDay,
   getMondayOfCurrentWeek,
   KekaAuthError,
@@ -89,7 +90,7 @@ async function loadProfileName(el) {
 /* ── Rendering ─────────────────────────────────────── */
 
 function renderWeek(ui, payload) {
-  const workDays = buildUiModel(parseLogShifts(payload));
+  const workDays = buildUiModel(parseLogShifts(payload), contextFromPayload(payload));
   const focus = pickFocusDay(workDays);
   reportUnknownStatuses(workDays, payload);
 
@@ -100,30 +101,42 @@ function renderWeek(ui, payload) {
   }
 
   workDays.forEach((day, i) => ui.output.appendChild(renderDay(day, i, day === focus)));
+
+  // A credited On Duty day has no clock to race — Keka grants the full shift
+  // regardless, and an unpunched flexible shift reports a meaningless end time.
+  if (focus.isCredited) {
+    stopCountdown();
+    ui.hero.dataset.state = 'over';
+    ui.heroEyebrow.textContent = focus.statusLabel || 'On duty';
+    ui.timer.textContent = 'Full day';
+    ui.heroFoot.innerHTML = `<strong>${focus.workedLabel || ''}</strong> credited — no clock-in needed`;
+    ui.heroFill.style.width = '100%';
+    return true;
+  }
+
   ui.heroFoot.innerHTML = `Suggested exit <strong>${focus.adjustedExitTime}</strong>`;
   startCountdown(ui, focus);
   return true;
 }
 
 /**
- * Dump the raw row for any day whose status we couldn't classify.
+ * Log the raw row for any day we still can't explain.
  *
- * Keka's attendanceDayStatus enum isn't published, so this is how a new code
- * (On Duty, comp-off, half day…) gets identified instead of silently rendering
- * as something it isn't. Right-click the popup → Inspect → Console to read it.
+ * On Duty and week offs are now resolved from their own endpoints, so anything
+ * left here is a genuinely new case worth reporting.
  */
 function reportUnknownStatuses(workDays, payload) {
-  const unknown = workDays.filter(d => d.statusLabel && d.statusLabel.startsWith('Status'));
+  const unknown = workDays.filter(d => d.statusKind === 'unknown');
   if (!unknown.length) return;
 
   const rows = (payload && payload.data) || [];
   console.warn(
-    `[keka] ${unknown.length} day(s) with an unrecognised attendanceDayStatus. ` +
-    `Please report the raw rows below so they can be mapped:`,
-    unknown.map(d => {
-      const raw = rows.find(r => new Date(r.shiftStartTime).toDateString() === d.startDate.toDateString());
-      return { date: d.shortDate, attendanceDayStatus: d.attendanceDayStatus, raw };
-    })
+    `[keka] ${unknown.length} unexplained day(s) — please report these rows:`,
+    unknown.map(d => ({
+      date: d.shortDate,
+      attendanceDayStatus: d.attendanceDayStatus,
+      raw: rows.find(r => new Date(r.shiftStartTime).toDateString() === d.startDate.toDateString()),
+    }))
   );
 }
 
@@ -153,7 +166,7 @@ function renderDay(day, index, isFocus) {
   const delta = document.createElement('div');
   if (off) {
     delta.className = 'day-delta day-delta--flat';
-    delta.textContent = day.statusLabel && day.statusLabel.startsWith('Status') ? '?' : 'OFF';
+    delta.textContent = day.statusKind === 'unknown' ? '?' : 'OFF';
   } else {
     delta.className = `day-delta day-delta--${day.accMinutes > 0 ? 'ahead' : (day.accMinutes < 0 ? 'behind' : 'flat')}`;
     delta.textContent = formatDelta(day.accMinutes);
@@ -167,8 +180,9 @@ function renderDay(day, index, isFocus) {
     // Never assume "leave" — an unrecognised status says so with its raw code.
     bits = [day.statusLabel || 'On leave'];
   } else if (day.isCredited) {
-    // On Duty / WFH: no punches to show, so name the status instead.
-    bits = [day.statusLabel || 'On duty', `exit ${day.adjustedExitTime}`];
+    // On Duty / WFH: no punches, and no meaningful exit time — an unpunched
+    // flexible shift reports a placeholder end, so showing it would mislead.
+    bits = [day.statusLabel || 'On duty'];
     if (day.workedLabel) bits.push(`${day.workedLabel} credited`);
   } else {
     bits = [`${day.entryTime} – ${day.exitTime}`, `exit ${day.adjustedExitTime}`];
@@ -210,6 +224,11 @@ function formatDelta(minutes) {
 }
 
 let countdownInterval = null;
+
+function stopCountdown() {
+  if (countdownInterval) clearInterval(countdownInterval);
+  countdownInterval = null;
+}
 
 function startCountdown(ui, day) {
   const target = day.adjustedExitTimeDate.getTime();

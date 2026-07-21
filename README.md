@@ -51,20 +51,25 @@ There is no analytics, no server, no third party.
 
 ## Day statuses
 
-Keka does not publish its `attendanceDayStatus` enum, so the extension classifies
-each day defensively:
+The attendance summary alone cannot explain a day, so the extension joins three
+endpoints:
 
-- **Present / punched in** — normal working day, balance from actual hours.
-- **On Duty / WFH** — credited as a full shift even with no badge punches, so it
-  lands balance-neutral instead of looking like a day of missed hours. Detected
-  from the row's on-duty fields rather than a hardcoded status code.
-- **Weekly off / holiday** — no shift expected, ignored in the balance.
-- **Anything unrecognised** — shown as `Status <n>` with a `?` badge and left out
-  of the balance. It is never labelled "On leave" on a guess.
+| Source | Gives |
+| --- | --- |
+| `attendance/summary/<monday>` | punches, hours, shift |
+| `attendance/workingremotelyrequests` | **On Duty / WFH days** (`requestType` 6) |
+| `attendance/day-wise-shift-weeklyoff-details` | real week offs (`weekOffType` 2) |
 
-If a day shows `Status <n>`, open the popup, right-click → **Inspect** →
-**Console**. The raw row is logged there; add the code to `ON_DUTY_STATUS_CODES`
-in `keka.js` if it should count as worked.
+An **On Duty day looks blank on the attendance row** — `attendanceDayStatus: 0`,
+no punches, empty `leaveDetails`. It is only identifiable from the working-remotely
+request, which is why it used to be mistaken for leave. On Duty days are credited
+the full shift so they stay balance-neutral, and are shown as `On duty` (with
+`(pending)` while awaiting approval).
+
+Real leave is read from `leaveDetails` / `leaveDayStatuses` and shows its actual
+type, e.g. `Privileged Leave`.
+
+Only the summary call is required — if the other two fail the popup still renders.
 
 ## Other tenants
 

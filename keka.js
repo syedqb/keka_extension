@@ -113,13 +113,41 @@ export async function loadWeek() {
   if (!token) throw new KekaAuthError('No Keka session found');
 
   try {
-    return await fetchWeek(token, getMondayOfCurrentWeek());
+    return await loadWeekWith(token);
   } catch (error) {
     if (!(error instanceof KekaAuthError)) throw error;
     const fresh = await refreshTokenFromKekaTab();
     if (!fresh) throw error;
-    return fetchWeek(fresh, getMondayOfCurrentWeek());
+    return loadWeekWith(fresh);
   }
+}
+
+/**
+ * The week needs three calls: the attendance rows, the On Duty requests, and the
+ * week-off schedule. Only the first is essential — the other two degrade to empty
+ * rather than taking the whole popup down with them.
+ */
+async function loadWeekWith(token) {
+  const monday = getMondayOfCurrentWeek();
+  const [summary, onDuty, weekOff] = await Promise.all([
+    fetchWeek(token, monday),
+    fetchOnDutyDays(token, monday).catch(() => new Map()),
+    fetchWeekOffDays(token).catch(() => new Set()),
+  ]);
+
+  return {
+    ...summary,
+    onDutyDays: [...onDuty.entries()],
+    weekOffDays: [...weekOff],
+  };
+}
+
+/** Rebuild the lookup structures from a cached (JSON-safe) payload. */
+export function contextFromPayload(payload) {
+  return {
+    onDutyDays: new Map((payload && payload.onDutyDays) || []),
+    weekOffDays: new Set((payload && payload.weekOffDays) || []),
+  };
 }
 
 /* ── Cache ─────────────────────────────────────────── */
@@ -164,73 +192,114 @@ class LogShift {
 }
 
 /**
- * attendanceDayStatus codes confirmed from live responses.
- *
- * Keka does not publish this enum, so anything not listed here is treated as
- * "unknown" and reported rather than guessed at — see classifyDay().
+ * attendanceDayStatus values, confirmed against live responses.
+ * 0 simply means "nothing recorded" — it is not a leave marker.
  */
 export const DAY_STATUS = {
+  NONE: 0,
   PRESENT: 1,
 };
 
+/** weekOffType from day-wise-shift-weeklyoff-details: 0 = working day, 2 = full week off. */
+export const WEEK_OFF_FULL = 2;
+
+/** requestType 6 = "working remotely" (Keka's On Duty / WFH request). */
+const REQUEST_TYPE_REMOTE = 6;
+/** requestStatus 1 = pending approval. */
+const REQUEST_PENDING = 1;
+
+export function dateKey(value) {
+  const d = value instanceof Date ? value : new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /**
- * Status codes Keka credits as a full working day with no in/out punches:
- * On Duty, Work From Home, on-duty regularisation.
+ * On Duty / WFH lives in its own endpoint, not on the attendance row.
  *
- * Add a code here once confirmed — everything else is inferred by
- * looksLikeOnDuty() below, which does not depend on knowing the enum.
+ * This is why the day looked like leave: the summary row for an On Duty day is
+ * simply blank (attendanceDayStatus 0, no punches, no leave details). The request
+ * has to be fetched separately and joined on by date.
  */
-export const ON_DUTY_STATUS_CODES = new Set();
+export async function fetchOnDutyDays(token, monday) {
+  const from = monday;
+  const to = dateKey(new Date(new Date(`${monday}T00:00:00`).getTime() + 6 * 86400000));
+  const url = `${TENANT}/k/attendance/api/mytime/attendance/workingremotelyrequests`
+    + `?fromDate=${from}&toDate=${to}`;
 
-const ON_DUTY_HINT = /(on.?duty|work.?from.?home|\bwfh\b|remote)/i;
+  const payload = await authedJson(url, token);
+  const requests = (payload && payload.data) || [];
+  const days = new Map();
 
-/**
- * Detect On Duty / WFH without relying on the undocumented status enum.
- *
- * The summary rows carry extra fields we don't otherwise read, and an On Duty day
- * is flagged somewhere among them. Rather than hardcode a field name we haven't
- * confirmed, look for a truthy on-duty-ish key or a matching string value.
- */
-function looksLikeOnDuty(raw) {
-  if (!raw || typeof raw !== 'object') return false;
-
-  for (const [key, value] of Object.entries(raw)) {
-    if (value === null || value === undefined || value === false) continue;
-    if (ON_DUTY_HINT.test(key) && value !== 0) return true;
-    if (typeof value === 'string' && ON_DUTY_HINT.test(value)) return true;
+  for (const req of requests) {
+    if (req.requestType !== REQUEST_TYPE_REMOTE) continue;
+    // Requests cover an inclusive date range, so expand it day by day.
+    const start = new Date(`${String(req.fromDate).slice(0, 10)}T00:00:00`);
+    const end = new Date(`${String(req.toDate).slice(0, 10)}T00:00:00`);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      days.set(dateKey(d), { pending: req.requestStatus === REQUEST_PENDING });
+    }
   }
-  return false;
+  return days;
+}
+
+/** Authoritative week-off days, replacing the old "Saturday" guess. */
+export async function fetchWeekOffDays(token) {
+  const url = `${TENANT}/k/attendance/api/mytime/attendance/day-wise-shift-weeklyoff-details`;
+  const payload = await authedJson(url, token);
+  const details = (payload && payload.data && payload.data.shiftWeekoffDetails) || {};
+  const offDays = new Set();
+
+  for (const [date, entries] of Object.entries(details)) {
+    const entry = Array.isArray(entries) ? entries[0] : null;
+    if (entry && entry.weekOffType === WEEK_OFF_FULL) offDays.add(date.slice(0, 10));
+  }
+  return offDays;
 }
 
 /**
  * Decide how a day counts.
  *
  *   worked  — you owe/earn hours on this day
- *   off     — weekly off, holiday, or leave; no hours expected
- *   unknown — an unrecognised status code
+ *   off     — week off, holiday, or leave; no hours expected
+ *   unknown — nothing recorded and no explanation for it
  *
- * "unknown" is deliberately balance-neutral and labelled with its raw code.
- * The old logic treated every non-PRESENT status as leave, which mislabelled
- * On Duty (WFH) days and, worse, dropped them from the running balance.
+ * `context` carries the two things the attendance row cannot tell us on its own:
+ * which days are On Duty, and which are week offs.
  */
-export function classifyDay(shift) {
-  const status = shift.attendanceDayStatus;
+export function classifyDay(shift, context = {}) {
+  const { onDutyDays, weekOffDays } = context;
+  const key = dateKey(shift.shiftStartTime);
   const hasPunches = shift.inTime != null;
 
-  if (status === DAY_STATUS.PRESENT) return { kind: 'worked', label: null, credited: false };
+  // Real leave is explicit on the row — no guessing needed.
+  const leave = (shift.raw && (shift.raw.leaveDetails || [])[0]) || null;
+  const onLeave = leave || (shift.raw && (shift.raw.leaveDayStatuses || []).length > 0);
 
-  // Credited full day: on duty / WFH, typically with no badge punches at all.
-  if (ON_DUTY_STATUS_CODES.has(status) || looksLikeOnDuty(shift.raw)) {
-    return { kind: 'worked', label: 'On duty', credited: !hasPunches };
+  const onDuty = onDutyDays && onDutyDays.get(key);
+  if (onDuty) {
+    return {
+      kind: 'worked',
+      label: onDuty.pending ? 'On duty (pending)' : 'On duty',
+      credited: !hasPunches,
+    };
   }
 
-  // Punches on a non-present status still mean you were at work.
-  if (hasPunches) return { kind: 'worked', label: null, credited: false };
+  if (onLeave) {
+    return { kind: 'off', label: (leave && leave.leaveTypeName) || 'On leave', credited: false };
+  }
 
-  // No punches, no shift expected — a genuine day off.
+  if (weekOffDays && weekOffDays.has(key)) {
+    return { kind: 'off', label: 'Weekly off', credited: false };
+  }
+
+  if (shift.attendanceDayStatus === DAY_STATUS.PRESENT || hasPunches) {
+    return { kind: 'worked', label: null, credited: false };
+  }
+
   if (!shift.shiftDuration) return { kind: 'off', label: 'Weekly off', credited: false };
 
-  return { kind: 'unknown', label: `Status ${status}`, credited: false };
+  // Nothing logged and nothing to explain it — absent, or a day not started yet.
+  return { kind: 'unknown', label: 'No entries', credited: false };
 }
 
 /**
@@ -280,19 +349,18 @@ class WorkDay {
   }
 }
 
-export function buildUiModel(logShifts) {
+export function buildUiModel(logShifts, context = {}) {
   const workDays = [];
 
   const dateFormat = new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'short' });
   const shortFormat = new Intl.DateTimeFormat('en-US', { weekday: 'short', day: '2-digit', month: 'short' });
   const timeFormat = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
-  const dayFormat = new Intl.DateTimeFormat('en-US', { weekday: 'long' });
 
   let accumulatedMinute = 0;
   let inMinute = 0;
 
   for (const shift of logShifts) {
-    const status = classifyDay(shift);
+    const status = classifyDay(shift, context);
     const isWorkingDay = status.kind === 'worked';
 
     let adjustedExitTime = new Date(shift.shiftEndTime);
@@ -316,6 +384,7 @@ export function buildUiModel(logShifts) {
       adjustedExitTimeDate: adjustedExitTime,
       isWorkingDay: isWorkingDay,
       statusLabel: status.label,
+      statusKind: status.kind,
       isCredited: status.credited,
       attendanceDayStatus: shift.attendanceDayStatus,
       workedLabel: status.credited
@@ -328,10 +397,9 @@ export function buildUiModel(logShifts) {
       inMinute = accumulatedMinute * 60;
     }
 
-    if (dayFormat.format(new Date(shift.shiftStartTime)) === 'Saturday') {
-      accumulatedMinute = 0;
-      inMinute = 0;
-    }
+    // The old code zeroed the balance every Saturday. The API returns one Mon–Sun
+    // week per call, so the balance already starts fresh — and week offs are now
+    // read from weekOffDays rather than assumed to be Saturday.
 
     workDays.push(day);
   }
